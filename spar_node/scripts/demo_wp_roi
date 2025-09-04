@@ -20,7 +20,14 @@ from spar_msgs.msg import FlightMotionAction, FlightMotionGoal
 # will call it's own functions as callbacks, etc.
 class Guidance():
 	def __init__(self, waypoints):
-		# Make sure we have a valid waypoint list
+		# Make sure we have a valid waypoint 
+		
+		# Safe boundary values, default to X<2, Y<2 Z<2
+		self.safeRangeX = rospy.get_param("~safeRangeX", 2)
+		self.safeRangeY = rospy.get_param("~safeRangeY", 2)
+		self.safeRangeZ = rospy.get_param("~safeRangeZ", 3)
+
+
 		if not self.check_waypoints(waypoints):
 			raise ArgumentError("Invalid waypoint list input!")
 
@@ -58,10 +65,12 @@ class Guidance():
 			# Setup first waypoint segment
 			# XXX:	Another option would be to do "takeoff" and leave "waypoint_counter = 0" to
 			#		begin the mission at the first waypoint after take-off
+			rospy.loginfo("Heading to wapoint 1")
 			self.send_wp(self.waypoints[0])
 			self.waypoint_counter += 1
 
 			# Setup a timer to check if our waypoint has completed at 20Hz
+			rospy.loginfo("Setting callbacks")
 			self.timer = rospy.Timer( rospy.Duration(1.0/20.0), self.check_waypoint_status )
 			# Callback to save "current location" such that we can perform and return
 			# from a diversion to the correct location
@@ -78,6 +87,7 @@ class Guidance():
 
 			# If shutdown is issued (eg. CTRL+C), cancel current
 	 		# mission before rospy is shutdown.
+			rospy.loginfo("Running callbacks while not shutdown...")
 			rospy.on_shutdown( lambda : self.shutdown() )
 
 	# This function will check if a list of waypoints is in the format we expect
@@ -114,6 +124,11 @@ class Guidance():
 			rospy.logwarn("Waypoint has an invalid length (must be X/Y/Z/Yaw)")
 			return False
 
+		# Check if the waypoint is inside the net
+		if abs(wp[0]) > self.safeRangeX or abs(wp[1]) > self.safeRangeY or wp[2] > self.safeRangeZ:
+			rospy.logwarn("Out of O134 Boundaries(Must be -{}<X<{}, -{}<Y<{}, Z<{}/Yaw)".format(self.safeRangeX,self.safeRangeX,self.safeRangeY,self.safeRangeY,self.safeRangeZ))
+			return False
+		
 		# If we haven't returned false yet, then waypoint looks valid!
 		return True
 
@@ -121,6 +136,7 @@ class Guidance():
 	# This function will make sure we shut down the node as safely as possible
 	def shutdown(self):
 		# Unregister anything that needs it here
+		rospy.loginfo("Unregistering topics and shuting down...")
 		self.sub_pose.unregister()
 		self.sub_roi.unregister()
 		self.spar_client.cancel_goal()
@@ -252,15 +268,29 @@ class Guidance():
 def main(args):
 	# Initialise ROS
 	rospy.init_node('guidance')
+	surveyAltitude = rospy.get_param("~surveyAlt", 1)
 
 	# List of waypoints
 	# [X, Y, Z, Yaw]
-	wps = [[ 0.0, 0.0, 1.0, 0.0],
-		   [ 1.0, 1.0, 1.0, 0.0],
-		   [-1.0, 1.0, 1.0, 0.0],
-		   [-1.0,-1.0, 1.0, 0.0],
-		   [ 1.0,-1.0, 1.0, 0.0],
-		   [ 0.0, 0.0, 1.0, 0.0]]
+
+	wpsR1 = [[ 0.0, 0.0,surveyAltitude, 0.0],
+		   [ 1.0, 1.0, surveyAltitude, 0.0],
+		   [-1.0, 1.0, surveyAltitude, 0.0],
+		   [-1.0,-1.0, surveyAltitude, 0.0],
+		   [ 1.0,-1.0, surveyAltitude, 0.0],
+		   [ 0.0, 0.0, surveyAltitude, 0.0]]
+	
+	wpsR2 = [[ 0.0, 0.0,surveyAltitude*2, 0.0],
+		   [ 1.0, 1.0, surveyAltitude*2, 0.0],
+		   [-1.0, 1.0, surveyAltitude*2, 0.0],
+		   [-1.0,-1.0, surveyAltitude*2, 0.0],
+		   [ 1.0,-1.0, surveyAltitude*2, 0.0],
+		   [ 0.0, 0.0, surveyAltitude*2, 0.0]]
+	
+	if surveyAltitude > 2:
+		wps = wpsR1
+	else:
+		wps = wpsR2
 
 	# Create our guidance class option
 	guide = Guidance(wps)
